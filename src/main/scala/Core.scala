@@ -3,9 +3,8 @@ import Chisel._
 object Implicits {
   implicit class RichUInt(self: UInt) {
     def sext(width: Int): UInt = {
-      val tmp = Wire(SInt(width = width))
-      tmp := self.toSInt
-      tmp.toUInt
+      val w = self.getWidth
+      Fill(width - w, self(w - 1)) ## self
     }
   }
 }
