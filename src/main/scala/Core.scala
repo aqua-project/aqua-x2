@@ -18,14 +18,14 @@ class DMemIO extends Bundle {
   }
   val resp = new Bundle {
     val reg_write = Bool(INPUT)
-    val reg_dest = (OUTPUT, width = 32)
+    val reg_dest = UInt(OUTPUT, width = 32)
     val data = UInt(OUTPUT, width = 32)
   }
 }
 
 
 class ALUIO extends Bundle {
-  val func = UInt(INPUT, width = 4)
+  val tag = UInt(INPUT, width = 4)
   val a = UInt(INPUT, width = 32)
   val b = UInt(INPUT, width = 32)
   val c = UInt(OUTPUT, width = 32)
@@ -41,26 +41,30 @@ class Core extends Module {
 
   /** Hazard */
 
+  val data_hazard = Bool(false)                                           // TODO
   val stop_fetch = !io.imem.ready || !io.dmem.ready || data_hazard
   val stop_decode = !io.dmem.ready
+  val stop_execute = !io.dmem.ready
 
 
   /** Fetch */
 
   val nextpc = Reg(UInt(width = 32))
+  val pc_src = Reg(Bool())
+  val pc_addr = Reg(UInt(width = 32))
 
   val pc = Mux(pc_src, pc_addr, nextpc)
-  val pc4 = pc + 4
+  val pc4 = pc + UInt(4)
 
-  io.imem.addr.valid := !stop_fetch
-  io.imem.addr.bits := pc
+  io.imem.valid := !stop_fetch
+  io.imem.addr := pc
 
   unless (stop_fetch) {
     nextpc := pc4
   }
 
 
-  /** Decode & Read */
+  /** Decode & Read & Branch */
 
   val idata = io.imem.data
   val opcode = idata(31, 26)
@@ -80,19 +84,38 @@ class Core extends Module {
   val rv2 = rf(rs2)
 
   val disp16 = Mux(idata(26), disp_s, disp_l)
-  val disp21 = Mux(idata(31, 29) === UInt("b101"), disp_c, disp_l)
+  val raw_disp21 = Mux(idata(31, 29) === UInt("b101"), disp_c, disp_l)
+  val disp21 = Mux(idata(26), raw_disp21 << 11, raw_disp21)
   val rv2_or_lit = Mux(idata(26), rv2, lit)
   val mem_valid = idata(31, 29) === UInt("b011")
   val reg_write = idata(29) || (mem_valid && idata(28, 26) =/= UInt("b001"))
+  val ucjmp = idata(31, 29) === UInt("b100")
+  val cjmp = idata(31, 29) === UInt("b101")
+  val ild = idata(31, 29) === UInt("b010")
 
   val id_va = Reg(next = rv1)
-  val id_vb = Reg(next = rv2)
+  val id_vb = Reg(next = rv2_or_lit)
   val id_tag = Reg(next = tag)
-  val id_func = Reg(next = func)
   val id_disp16 = Reg(next = disp16)
+  val id_disp21 = Reg(next = disp21)
+  val id_ucjmp = Reg(next = ucjmp)
+  val id_ild = Reg(next = ild)
   val id_mem_valid = Reg(next = mem_valid)
   val id_reg_write = Reg(next = reg_write)
   val id_reg_dest = Reg(next = rd)
+  val id_nextpc = Reg(next = nextpc)
+
+  val disp21x4 = raw_disp21 << 2
+  val eq0 = rv1 === UInt(0)
+  val lt0 = rv1 < UInt(0)
+  val le0 = rv1 <= UInt(0)
+  val cjcases = (0 until 7) map (UInt(_)) zip Seq(eq0, !eq0, lt0, le0, !le0, !lt0)
+  val cjtaken = MuxLookup(idata(28, 26), Bool(false), cjcases)
+  pc_src := ucjmp || (cjmp && cjtaken)
+  pc_addr := Mux(idata === UInt("100001"), rv1, nextpc + disp21x4)
+
+
+  // --- point of no return --- //
 
 
   /** Execute */
@@ -103,7 +126,7 @@ class Core extends Module {
   alu.io.b := id_vb
 
   val raddr = id_va + id_disp16
-  val rdata = alu.io.c
+  val rdata = MuxCase(alu.io.c, Seq(id_ucjmp -> id_nextpc, id_ild -> id_disp21))
 
   val ex_addr = Reg(next = raddr)
   val ex_data = Reg(next = rdata)
