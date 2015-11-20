@@ -1,5 +1,15 @@
 import Chisel._
 
+object Implicits {
+  implicit class RichUInt(self: UInt) {
+    def sext(width: Int): UInt = {
+      val tmp = Wire(SInt(width = width))
+      tmp := self.toSInt
+      tmp.toUInt
+    }
+  }
+}
+
 class IMemIO extends Bundle {
   val valid = Bool(INPUT)
   val ready = Bool(OUTPUT)
@@ -39,18 +49,20 @@ class ALU extends Module {
   val vsub = a - b
   val vsll = a << b
   val vsrl = a >> b
-  val vsra = a.toSInt >> b
+  val vsra = (a.toSInt >> b).toUInt
   val vand = a & b
   val vior = a | b
   val vxor = a ^ b
 
-  val cases = Seq(vadd, vsub, vsll, vsrl, vsra, vand, vior, vxor).zipWithIndex.map { case (v, i) => UInt(i) -> v }
+  val cases = (0 until 8) map (UInt(_)) zip Seq(vadd, vsub, vsll, vsrl, vsra, vand, vior, vxor)
 
   io.c := MuxLookup(tag, UInt(0), cases)
 
 }
 
 class Core extends Module {
+
+  import Implicits._
 
   val io = new Bundle {
     val imem = new IMemIO().flip
@@ -93,16 +105,16 @@ class Core extends Module {
   val opcode = idata(31, 26)
   val rs1 = idata(25, 21)
   val rs2 = idata(20, 16)
-  val lit = idata(20, 9).toSInt
+  val lit = idata(20, 9).sext(32)
   val func = idata(15, 9)
   val tag = idata(8, 5)
   val rd = idata(4, 0)
-  val disp_n = idata(25, 5).toSInt
-  val disp_l = idata(20, 5).toSInt
-  val disp_c = idata(20, 0).toSInt
-  val disp_s = idata(15, 0).toSInt
+  val disp_n = idata(25, 5).sext(32)
+  val disp_l = idata(20, 5).sext(32)
+  val disp_c = idata(20, 0).sext(32)
+  val disp_s = idata(15, 0).sext(32)
 
-  val rf = Reg(Vec(32, UInt(width = 32)))
+  val rf = Mem(UInt(width = 32), 32)
   val rv1 = rf(rs1)
   val rv2 = rf(rs2)
 
@@ -115,18 +127,18 @@ class Core extends Module {
   val ucjmp = idata(31, 29) === UInt("b100")
   val cjmp = idata(31, 29) === UInt("b101")
   val ild = idata(31, 29) === UInt("b010")
+  val reg_alu = idata(31, 29) === UInt("b000")
+  val mdata = Mux(ucjmp, nextpc, disp21)
 
   val id_va = Reg(next = rv1)
   val id_vb = Reg(next = rv2_or_lit)
   val id_tag = Reg(next = tag)
   val id_disp16 = Reg(next = disp16)
-  val id_disp21 = Reg(next = disp21)
-  val id_ucjmp = Reg(next = ucjmp)
-  val id_ild = Reg(next = ild)
+  val id_mdata = Reg(next = mdata)
+  val id_reg_alu = Reg(next = reg_alu)
   val id_mem_valid = Reg(next = mem_valid)
   val id_reg_write = Reg(next = reg_write)
   val id_reg_dest = Reg(next = rd)
-  val id_nextpc = Reg(next = nextpc)
 
   val disp21x4 = raw_disp21 << 2
   val eq0 = rv1 === UInt(0)
@@ -134,12 +146,13 @@ class Core extends Module {
   val le0 = rv1 <= UInt(0)
   val cjcases = (0 until 7) map (UInt(_)) zip Seq(eq0, !eq0, lt0, le0, !le0, !lt0)
   val cjtaken = MuxLookup(idata(28, 26), Bool(false), cjcases)
+  val npc_disp = nextpc + disp21x4
   pc_src := ucjmp || (cjmp && cjtaken)
-  pc_addr := Mux(idata === UInt("100001"), rv1, nextpc + disp21x4)
+  pc_addr := Mux(idata === UInt("b100001"), rv1, npc_disp)
 
   when (stop_decode) {
-    stop(id_va, id_vb, id_tag, id_disp16, id_disp21)
-    stop(id_ucjmp, id_ild, id_mem_valid, id_reg_write, id_reg_dest, id_nextpc)
+    stop(id_va, id_vb, id_tag, id_disp16, id_mdata)
+    stop(id_reg_alu, id_mem_valid, id_reg_write, id_reg_dest)
     stop(pc_src, pc_addr)
   }
 
@@ -155,7 +168,7 @@ class Core extends Module {
   alu.io.b := id_vb
 
   val raddr = id_va + id_disp16
-  val rdata = MuxCase(alu.io.c, Seq(id_ucjmp -> id_nextpc, id_ild -> id_disp21))
+  val rdata = Mux(id_reg_alu, alu.io.c, id_mdata)
 
   val ex_addr = Reg(next = raddr)
   val ex_data = Reg(next = rdata)
@@ -186,6 +199,8 @@ class CPU extends Module {
 
   val io = new Bundle {
   }
+
+  val core0 = Module(new Core)
 
 }
 
