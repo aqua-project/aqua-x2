@@ -31,6 +31,12 @@ class ALUIO extends Bundle {
   val c = UInt(OUTPUT, width = 32)
 }
 
+class ALU extends Module {
+
+  val io = new ALUIO()
+
+}
+
 class Core extends Module {
 
   val io = new Bundle {
@@ -41,17 +47,21 @@ class Core extends Module {
 
   /** Hazard */
 
-  val data_hazard = Bool(false)                                           // TODO
-  val stop_fetch = !io.imem.ready || !io.dmem.ready || data_hazard
+  val pc_src = Reg(Bool())
+  val pc_addr = Reg(UInt(width = 32))
+
+  val stop_fetch = !io.imem.ready || !io.dmem.ready
   val stop_decode = !io.dmem.ready
   val stop_execute = !io.dmem.ready
+
+  def stop(regs: Data*) {
+    for (reg <- regs) { reg := reg }
+  }
 
 
   /** Fetch */
 
   val nextpc = Reg(UInt(width = 32))
-  val pc_src = Reg(Bool())
-  val pc_addr = Reg(UInt(width = 32))
 
   val pc = Mux(pc_src, pc_addr, nextpc)
   val pc4 = pc + UInt(4)
@@ -114,6 +124,12 @@ class Core extends Module {
   pc_src := ucjmp || (cjmp && cjtaken)
   pc_addr := Mux(idata === UInt("100001"), rv1, nextpc + disp21x4)
 
+  when (stop_decode) {
+    stop(id_va, id_vb, id_tag, id_disp16, id_disp21)
+    stop(id_ucjmp, id_ild, id_mem_valid, id_reg_write, id_reg_dest, id_nextpc)
+    stop(pc_src, pc_addr)
+  }
+
 
   // --- point of no return --- //
 
@@ -134,6 +150,9 @@ class Core extends Module {
   val ex_reg_write = Reg(next = id_reg_write)
   val ex_reg_dest = Reg(next = id_reg_dest)
 
+  when (stop_execute) {
+    stop(ex_addr, ex_data, ex_mem_valid, ex_reg_write, ex_reg_dest)
+  }
 
   /** Memory */
 
