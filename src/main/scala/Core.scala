@@ -168,8 +168,8 @@ class Core extends Module {
   pc_addr := jaddr
 
   // Hazard
-  val rawh1 = id_reg_write && (id_reg_dest === rs1 || id_reg_dest === rs2)
-  val rawh2 = ex_reg_write && (ex_reg_dest === rs1 || ex_reg_dest === rs2)
+  val rawh1 = id_reg_write && (id_reg_dest === rs1 || id_reg_dest === rs2) && use_ra
+  val rawh2 = ex_reg_write && (ex_reg_dest === rs1 || ex_reg_dest === rs2) && use_rb
   val data_hazard = rawh1 || rawh2             // We could make this more precisely, but leave it for simplicity.
   stop_fetch := !io.imem.ready || !io.dmem.ready || data_hazard
   stop_decode := !io.dmem.ready
