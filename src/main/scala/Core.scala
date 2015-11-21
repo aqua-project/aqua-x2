@@ -26,10 +26,45 @@ class DMemIO extends Bundle {
     val reg_dest = UInt(INPUT, width = 5)
   }
   val resp = new Bundle {
-    val reg_write = Bool(INPUT)
+    val reg_write = Bool(OUTPUT)
     val reg_dest = UInt(OUTPUT, width = 32)
     val data = UInt(OUTPUT, width = 32)
   }
+}
+
+
+class ICache extends Module {
+
+  val io = new IMemIO
+
+  val cache = Mem(UInt(width = 32), 1024, seqRead = true)
+
+  val data = Reg(next = cache(io.addr))
+
+  when (!io.valid) { data := data }  // stop
+
+  io.ready := Bool(true)
+  io.data := data
+
+}
+
+
+class DCache extends Module {
+
+  val io = new DMemIO
+
+  val mem_read = io.req.reg_ma && io.req.reg_write
+  val rdata = UInt(0, width = 32)   // TODO
+
+  val reg_write = Reg(next = io.req.reg_write)
+  val reg_dest = Reg(next = io.req.reg_dest)
+  val data = Reg(next = Mux(mem_read, rdata, io.req.data))
+
+  io.ready := Bool(true)
+  io.resp.reg_write := reg_write
+  io.resp.reg_dest := reg_dest
+  io.resp.data := data
+
 }
 
 
@@ -236,6 +271,11 @@ class CPU extends Module {
   }
 
   val core0 = Module(new Core)
+  val icache0 = Module(new ICache)
+  val dcache0 = Module(new DCache)
+
+  core0.io.imem <> icache0.io
+  core0.io.dmem <> dcache0.io
 
 }
 
