@@ -21,7 +21,7 @@ class DMemIO extends Bundle {
   val req = new Bundle {
     val addr = UInt(INPUT, width = 32)
     val data = UInt(INPUT, width = 32)
-    val mem_valid = Bool(INPUT)
+    val reg_ma = Bool(INPUT)
     val reg_write = Bool(INPUT)
     val reg_dest = UInt(INPUT, width = 5)
   }
@@ -101,7 +101,7 @@ class Core extends Module {
   }
 
 
-  /** Stage 2. Decode & Read & Branch & Hazard */
+  /** Stage 2. Decode & Read & Forward & Branch & Hazard */
 
   val idata = io.imem.data
   val opcode = idata(31, 26)
@@ -118,30 +118,38 @@ class Core extends Module {
 
   // Read
   val rf = Mem(UInt(width = 32), 32)
-  val rv1 = rf(rs1)
-  val rv2 = rf(rs2)
+  val raw_rv1 = rf(rs1)
+  val raw_rv2 = rf(rs2)
+
+  // Forward
+  val rs1_wb_fw = io.dmem.resp.reg_write && io.dmem.resp.reg_dest === rs1
+  val rv1 = Mux(rs1_wb_fw, io.dmem.resp.data, raw_rv1)
+  val rs2_wb_fw = io.dmem.resp.reg_write && io.dmem.resp.reg_dest === rs2
+  val rv2 = Mux(rs2_wb_fw, io.dmem.resp.data, raw_rv2)
 
   // Decode
   val disp16 = Mux(idata(26), disp_s, disp_l)
   val raw_disp21 = Mux(idata(31, 29) === UInt("b101"), disp_c, disp_l)
   val disp21 = Mux(idata(26), raw_disp21 << 11, raw_disp21)
   val rv2_or_lit = Mux(idata(26), rv2, lit)
-  val mem_valid = idata(31, 29) === UInt("b011")
+  val reg_ma = idata(31, 29) === UInt("b011")
+  val reg_ex = idata(31, 29) === UInt("b000")
+  val reg_id = !reg_ex && !reg_ma
   val rd_is_r31 = rd === UInt(31)
-  val reg_write = (idata(29) || (mem_valid && idata(28, 26) =/= UInt("b001"))) && !rd_is_r31
+  val reg_write = (idata(29) || (reg_ma && idata(28, 26) =/= UInt("b001"))) && !rd_is_r31
   val ucjmp = idata(31, 29) === UInt("b100")
   val cjmp = idata(31, 29) === UInt("b101")
   val ild = idata(31, 29) === UInt("b010")
-  val reg_alu = idata(31, 29) === UInt("b000")
-  val mdata = Mux(ucjmp, nextpc, disp21)
+  val data = Mux(ucjmp, nextpc, disp21)
 
   val id_va = Reg(next = rv1)
   val id_vb = Reg(next = rv2_or_lit)
   val id_tag = Reg(next = tag)
   val id_disp16 = Reg(next = disp16)
-  val id_mdata = Reg(next = mdata)
-  val id_reg_alu = Reg(next = reg_alu)
-  val id_mem_valid = Reg(next = mem_valid)
+  val id_data = Reg(next = data)
+  val id_reg_id = Reg(next = reg_id)
+  val id_reg_ex = Reg(next = reg_ex)
+  val id_reg_ma = Reg(next = reg_ma)
   val id_reg_write = Reg(next = reg_write)
   val id_reg_dest = Reg(next = rd)
 
@@ -161,21 +169,20 @@ class Core extends Module {
   // Hazard
   val rawh1 = id_reg_write && (id_reg_dest === rs1 || id_reg_dest === rs2)
   val rawh2 = ex_reg_write && (ex_reg_dest === rs1 || ex_reg_dest === rs2)
-  val rawh3 = io.dmem.resp.reg_write && (io.dmem.resp.reg_dest === rs1 || io.dmem.resp.reg_dest === rs2)
-  val data_hazard = rawh1 || rawh2 || rawh3    // We could make this more precise, but leave it for simplicity.
+  val data_hazard = rawh1 || rawh2             // We could make this more precisely, but leave it for simplicity.
   stop_fetch := !io.imem.ready || !io.dmem.ready || data_hazard
   stop_decode := !io.dmem.ready
   val kill_decode = data_hazard || pc_src
 
   when (kill_decode) {
     pc_src := Bool(false)
-    id_mem_valid := Bool(false)
+    id_reg_ma := Bool(false)
     id_reg_write := Bool(false)
   }
 
   when (stop_decode) {
-    stop(id_va, id_vb, id_tag, id_disp16, id_mdata)
-    stop(id_reg_alu, id_mem_valid, id_reg_write, id_reg_dest)
+    stop(id_va, id_vb, id_tag, id_disp16, id_data)
+    stop(id_reg_id, id_reg_ex, id_reg_ma, id_reg_write, id_reg_dest)
     stop(pc_src, pc_addr)
   }
 
@@ -195,23 +202,23 @@ class Core extends Module {
   alu.io.b := id_vb
 
   val raddr = id_va + id_disp16
-  val rdata = Mux(id_reg_alu, alu.io.c, id_mdata)
+  val rdata = Mux(id_reg_ex, alu.io.c, id_data)
 
   val ex_addr = Reg(next = raddr)
   val ex_data = Reg(next = rdata)
-  val ex_mem_valid = Reg(next = id_mem_valid)
+  val ex_reg_ma = Reg(next = id_reg_ma)
   ex_reg_write := id_reg_write
   ex_reg_dest := id_reg_dest
 
   when (stop_execute) {
-    stop(ex_addr, ex_data, ex_mem_valid, ex_reg_write, ex_reg_dest)
+    stop(ex_addr, ex_data, ex_reg_ma, ex_reg_write, ex_reg_dest)
   }
 
   /** Stage 4. Memory */
 
   io.dmem.req.addr := ex_addr
   io.dmem.req.data := ex_data
-  io.dmem.req.mem_valid := ex_mem_valid
+  io.dmem.req.reg_ma := ex_reg_ma
   io.dmem.req.reg_write := ex_reg_write
   io.dmem.req.reg_dest := ex_reg_dest
 
