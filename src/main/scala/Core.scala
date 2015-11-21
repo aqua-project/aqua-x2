@@ -105,6 +105,9 @@ class Core extends Module {
 
   val idata = io.imem.data
   val opcode = idata(31, 26)
+  val use_rx = opcode(5).toBool
+  val use_ra = opcode(4).toBool
+  val use_rb = opcode(3).toBool
   val rs1 = idata(25, 21)
   val rs2 = idata(20, 16)
   val lit = idata(20, 9).sext(32)
@@ -128,19 +131,17 @@ class Core extends Module {
   val rv2 = Mux(rs2_wb_fw, io.dmem.resp.data, raw_rv2)
 
   // Decode
-  val disp16 = Mux(idata(26), disp_s, disp_l)
-  val raw_disp21 = Mux(idata(31, 29) === UInt("b101"), disp_c, disp_l)
-  val disp21 = Mux(idata(26), raw_disp21 << 11, raw_disp21)
-  val rv2_or_lit = Mux(idata(26), rv2, lit)
-  val reg_ma = idata(31, 29) === UInt("b011")
-  val reg_ex = idata(31, 29) === UInt("b000")
-  val reg_id = !reg_ex && !reg_ma
+  val disp16 = Mux(use_rx, disp_l, disp_s)
+  val immv = Mux(opcode(0), disp_n << 11, disp_n)
+  val rv2_or_lit = Mux(use_rb, rv2, lit)
   val rd_is_r31 = rd === UInt(31)
-  val reg_write = (idata(29) || (reg_ma && idata(28, 26) =/= UInt("b001"))) && !rd_is_r31
-  val ucjmp = idata(31, 29) === UInt("b100")
-  val cjmp = idata(31, 29) === UInt("b101")
-  val ild = idata(31, 29) === UInt("b010")
-  val data = Mux(ucjmp, nextpc, disp21)
+  val reg_write = use_rx && !rd_is_r31
+  val ucjmp = opcode(2, 0) === UInt("b000")
+  val cjmp = opcode(2, 0) === UInt("b010")
+  val reg_ma = opcode(2) && opcode(1) && (opcode(5) || opcode(3))
+  val reg_ex = opcode(5, 2) === UInt("b1110") || opcode(5, 1) === UInt("b11001")
+  val reg_id = ucjmp || opcode(5, 4) === UInt("b10") || opcode === UInt("b110001")
+  val data = Mux(ucjmp, nextpc, immv)
 
   val id_va = Reg(next = rv1)
   val id_vb = Reg(next = rv2_or_lit)
@@ -157,12 +158,12 @@ class Core extends Module {
   val eq0 = rv1 === UInt(0)
   val lt0 = rv1 < UInt(0)
   val le0 = rv1 <= UInt(0)
-  val cjcases = (0 until 6) map (UInt(_)) zip Seq(eq0, !eq0, lt0, le0, !le0, !lt0)
-  val cjtaken = MuxLookup(idata(28, 26), Bool(false), cjcases)
+  val cjcases = (0 until 8) map (UInt(_)) zip Seq(Bool(false), eq0, lt0, le0, Bool(false), !eq0, !lt0, !le0)
+  val cjtaken = MuxLookup(opcode(2, 0), Bool(false), cjcases)
   val jtaken = ucjmp || (cjmp && cjtaken)
-  val disp21x4 = raw_disp21 << 2
-  val npc_disp = nextpc + disp21x4
-  val jaddr = Mux(idata === UInt("b100001"), rv1, npc_disp)
+  val disp21 = Mux(use_rx, disp_n, disp_c)
+  val npc_disp = nextpc + (disp21 << 2)
+  val jaddr = Mux(opcode(5, 4) === UInt("b11"), rv1, npc_disp)
   pc_src := jtaken
   pc_addr := jaddr
 
