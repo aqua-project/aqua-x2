@@ -36,35 +36,46 @@ class DMemIO extends Bundle {
 class ICache extends Module {
 
   val io = new IMemIO
+  val waitCnt = 1000;
+  val wayBits = 1;
+  val lineBits = 1;
 
-  val cache = Mem(UInt(width = 32), 1024, seqRead = true)
-
-  val data = Reg(next = cache(io.addr))
-
-  when (!io.valid) { data := data }  // stop
-
-  io.ready := Bool(true)
-  io.data := data
-
+  val cache = Module (new Cache (wayBits,lineBits,waitCnt));
+  cache.io.cmdin.valid := io.valid;
+  cache.io.cmdin.bits.we := Bool(false);
+  cache.io.cmdin.bits.addr := io.addr;
+  
+  // This timing may be wrong
+  io.ready := cache.io.cmdin.ready;
+  io.data := cache.io.rdataFromCore.bits;
 }
 
 
 class DCache extends Module {
 
   val io = new DMemIO
-
-  val mem_read = io.req.reg_ma && io.req.reg_write
-  val rdata = UInt(0, width = 32)   // TODO
-
+  val waitCnt = 1000;
+  val wayBits = 1;
+  val lineBits = 1;
   val reg_write = Reg(next = io.req.reg_write)
   val reg_dest = Reg(next = io.req.reg_dest)
-  val data = Reg(next = Mux(mem_read, rdata, io.req.data))
 
-  io.ready := Bool(true)
+  val mem_read = io.req.reg_ma && io.req.reg_write
+
+  val cache = Module (new Cache (wayBits,lineBits,waitCnt));
+  cache.io.cmdin.valid := Bool(true);
+  cache.io.cmdin.bits.we := io.req.reg_write;
+  cache.io.cmdin.bits.addr := io.req.addr;
+  cache.io.wdataFromCore.bits := io.req.data;
+  cache.io.wdataFromCore.valid := Bool(true);
+  
+  // This timing may be wrong
+  io.ready := cache.io.cmdin.ready;
+  io.resp.data := cache.io.rdataFromCore.bits;
+
+  // TODO: usankusai
   io.resp.reg_write := reg_write
   io.resp.reg_dest := reg_dest
-  io.resp.data := data
-
 }
 
 
