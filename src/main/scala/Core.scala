@@ -21,7 +21,9 @@ class DMemIO extends Bundle {
   val req = new Bundle {
     val addr = UInt(INPUT, width = 32)
     val data = UInt(INPUT, width = 32)
+    // memory access is done when reg_ma is true
     val reg_ma = Bool(INPUT)
+    // reg_write is true when writing to register (So memory access type is read)
     val reg_write = Bool(INPUT)
     val reg_dest = UInt(INPUT, width = 5)
   }
@@ -62,8 +64,9 @@ class DCache extends Module {
   val mem_read = io.req.reg_ma && io.req.reg_write
 
   val cache = Module (new Cache (wayBits,lineBits,waitCnt));
-  cache.io.cmdin.valid := Bool(true);
-  cache.io.cmdin.bits.we := io.req.reg_write;
+
+  cache.io.cmdin.valid := io.req.reg_ma;
+  cache.io.cmdin.bits.we := ! io.req.reg_write;
   cache.io.cmdin.bits.addr := io.req.addr;
   cache.io.wdataFromCore.bits := io.req.data;
   cache.io.wdataFromCore.valid := Bool(true);
