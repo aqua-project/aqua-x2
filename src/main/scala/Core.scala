@@ -45,7 +45,6 @@ class ICache extends Module {
   cache.io.cmdin.bits.we := Bool(false);
   cache.io.cmdin.bits.addr := io.addr;
   
-  // This timing may be wrong
   io.ready := cache.io.cmdin.ready;
   io.data := cache.io.rdataFromCore.bits;
 }
@@ -69,7 +68,6 @@ class DCache extends Module {
   cache.io.wdataFromCore.bits := io.req.data;
   cache.io.wdataFromCore.valid := Bool(true);
   
-  // This timing may be wrong
   io.ready := cache.io.cmdin.ready;
   io.resp.data := cache.io.rdataFromCore.bits;
 
