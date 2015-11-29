@@ -34,49 +34,79 @@ class DMemIO extends Bundle {
   }
 }
 
+class DRamIO extends Bundle {
+  val req = Bool (OUTPUT);
+  val grant = Bool (INPUT);
+  val we = Bool (OUTPUT);
+  val addr = UInt (OUTPUT,width = 22);
+  val wdataToDRAM = Valid(UInt(width = 16));
+  val rdataToDRAM = Valid(UInt(width = 16)).flip;
+}
 
 class ICache extends Module {
 
-  val io = new IMemIO
+  val io = new Bundle {
+    val core = new IMemIO();
+    val ram  = new DRamIO();
+  };
   val waitCnt = 1000;
   val wayBits = 1;
   val lineBits = 1;
 
   val cache = Module (new Cache (wayBits,lineBits,waitCnt));
-  cache.io.cmdin.valid := io.valid;
+  cache.io.cmdin.valid := io.core.valid;
   cache.io.cmdin.bits.we := Bool(false);
-  cache.io.cmdin.bits.addr := io.addr;
+  cache.io.cmdin.bits.addr := io.core.addr;
   
-  io.ready := cache.io.cmdin.ready;
-  io.data := cache.io.rdataFromCore.bits;
+  io.ram.req := cache.io.req;
+  cache.io.grant := io.ram.grant;
+  io.ram.we := Bool(false);
+  io.ram.addr := cache.io.cmdout.bits.addr;
+//  io.ram.wdataToDRAM := cache.io.wdataToDRAM;
+  cache.io.rdataToDRAM := io.ram.rdataToDRAM;
+  
+  io.core.ready := cache.io.cmdin.ready;
+  io.core.data := cache.io.rdataFromCore.bits;
 }
 
 
 class DCache extends Module {
 
-  val io = new DMemIO
+  val io = new Bundle {
+    val core = new DMemIO;
+    val ram  = new DRamIO;
+  };
   val waitCnt = 1000;
   val wayBits = 1;
   val lineBits = 1;
-  val reg_write = Reg(next = io.req.reg_write)
-  val reg_dest = Reg(next = io.req.reg_dest)
+  val reg_write = Reg(next = io.core.req.reg_write)
+  val reg_dest = Reg(next = io.core.req.reg_dest)
 
-  val mem_read = io.req.reg_ma && io.req.reg_write
+  val mem_read = io.core.req.reg_ma && io.core.req.reg_write
 
   val cache = Module (new Cache (wayBits,lineBits,waitCnt));
 
-  cache.io.cmdin.valid := io.req.reg_ma;
-  cache.io.cmdin.bits.we := ! io.req.reg_write;
-  cache.io.cmdin.bits.addr := io.req.addr;
-  cache.io.wdataFromCore.bits := io.req.data;
+  cache.io.cmdin.valid := io.core.req.reg_ma;
+  cache.io.cmdin.bits.we := ! io.core.req.reg_write;
+  cache.io.cmdin.bits.addr := io.core.req.addr;
+  cache.io.wdataFromCore.bits := io.core.req.data;
   cache.io.wdataFromCore.valid := Bool(true);
   
-  io.ready := cache.io.cmdin.ready;
-  io.resp.data := cache.io.rdataFromCore.bits;
+  io.ram.req := cache.io.req;
+  cache.io.grant := io.ram.grant;
+
+  io.ram.we := Bool(false);
+  io.ram.addr := cache.io.cmdout.bits.addr;
+  io.ram.wdataToDRAM := cache.io.wdataToDRAM;
+  cache.io.rdataToDRAM := io.ram.rdataToDRAM;
+  
+
+  io.core.ready := cache.io.cmdin.ready;
+  io.core.resp.data := cache.io.rdataFromCore.bits;
 
   // TODO: usankusai
-  io.resp.reg_write := reg_write
-  io.resp.reg_dest := reg_dest
+  io.core.resp.reg_write := reg_write
+  io.core.resp.reg_dest := reg_dest
 }
 
 
