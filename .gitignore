@@ -1,4 +1,5 @@
 target/
+build/
 *.h
 *.cpp
 *.swp
