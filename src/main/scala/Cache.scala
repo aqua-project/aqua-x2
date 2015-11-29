@@ -85,15 +85,15 @@ class Cache (wayBits : Int,lineBits : Int,wtime : Int) extends Module {
   switch (state) {
     is (ready) {
       when (io.cmdin.valid) {
-        val varIndex = io.cmdin.bits.addr.apply(indexWidth + wordsWidth - 1,wordsWidth);
-        val varTag = io.cmdin.bits.addr.apply(20,indexWidth + wordsWidth);
-        val nowWay = MuxCase (UInt (numOfWay),Array (
+        val varIndex = io.cmdin.bits.addr(indexWidth + wordsWidth - 1,wordsWidth);
+        val varTag = io.cmdin.bits.addr(20,indexWidth + wordsWidth);
+        val nowWay = MuxCase (UInt (numOfWay), Seq(
           (varTag === tagArray(Cat(varIndex,UInt(0)))) -> UInt (0),
           (varTag === tagArray(Cat(varIndex,UInt(1)))) -> UInt (1)));
 
         when (nowWay != UInt(numOfWay)) {
           // cache hit
-          val tmp_posInLine = io.cmdin.bits.addr.apply (wordsWidth - 1,0)
+          val tmp_posInLine = io.cmdin.bits.addr(wordsWidth - 1,0)
           dram_buff.valid := Bool (false)
           nextWay (index) := UInt (1) - nowWay;
           when (io.cmdin.bits.we) {
@@ -118,7 +118,7 @@ class Cache (wayBits : Int,lineBits : Int,wtime : Int) extends Module {
           // burst access
           when (io.cmdin.bits.we) {
             // tag index words
-            val tmp_index = io.cmdin.bits.addr.apply(indexWidth + wordsWidth - 1,wordsWidth)
+            val tmp_index = io.cmdin.bits.addr(indexWidth + wordsWidth - 1,wordsWidth)
             // addr for write back
             addr := tagArray (Cat(tmp_index,nextWay (tmp_index),io.cmdin.bits.addr(indexWidth + wordsWidth - 1,0),UInt (0)))
           }.otherwise {
@@ -126,9 +126,9 @@ class Cache (wayBits : Int,lineBits : Int,wtime : Int) extends Module {
           }
           we   := io.cmdin.bits.we
           req  := Bool(true);
-          tag        := io.cmdin.bits.addr.apply(20,indexWidth + wordsWidth);
-          index      := io.cmdin.bits.addr.apply(indexWidth + wordsWidth - 1,wordsWidth);
-          posInLine := io.cmdin.bits.addr.apply (wordsWidth - 1,0)
+          tag        := io.cmdin.bits.addr(20,indexWidth + wordsWidth);
+          index      := io.cmdin.bits.addr(indexWidth + wordsWidth - 1,wordsWidth);
+          posInLine := io.cmdin.bits.addr(wordsWidth - 1,0)
 
           when (io.cmdin.bits.we) {
             dram_buff.bits := cache (Cat(varIndex,nextWay (index),UInt(0,lineBits + 1)))
@@ -149,9 +149,9 @@ class Cache (wayBits : Int,lineBits : Int,wtime : Int) extends Module {
         count := time
         when (mode === readMode && io.rdataToDRAM.valid) {
           when (wordCnt (0) === UInt (0)) {
-            cache (Cat (index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1)).apply(15,0) := io.rdataToDRAM.bits
+            cache (Cat (index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1))(15,0) := io.rdataToDRAM.bits
           }.otherwise {
-            cache (Cat (index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1)).apply(31,16) := io.rdataToDRAM.bits
+            cache (Cat (index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1))(31,16) := io.rdataToDRAM.bits
           }
         }
 
@@ -183,9 +183,9 @@ class Cache (wayBits : Int,lineBits : Int,wtime : Int) extends Module {
 
         when (mode) {
           when (wordCnt (0) === UInt (0)) {
-            dram_buff.bits := cache (Cat(index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1)).apply(15,0)
+            dram_buff.bits := cache (Cat(index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1))(15,0)
           }.otherwise {
-            dram_buff.bits := cache (Cat(index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1)).apply(31,16)
+            dram_buff.bits := cache (Cat(index,nextWay (index),posInLine) ^ wordCnt (wordsWidth,1))(31,16)
           }
           dram_buff.valid := Bool(true)
         }
