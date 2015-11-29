@@ -207,8 +207,8 @@ class Core extends Module {
 
   // Branch
   val eq0 = rv1 === UInt(0)
-  val lt0 = rv1 < UInt(0)
-  val le0 = rv1 <= UInt(0)
+  val lt0 = rv1(31).toBool
+  val le0 = eq0 || lt0
   val cjcases = (0 until 8) map (UInt(_)) zip Seq(Bool(false), eq0, lt0, le0, Bool(false), !eq0, !lt0, !le0)
   val cjtaken = MuxLookup(opcode(2, 0), Bool(false), cjcases)
   val jtaken = ucjmp || (cjmp && cjtaken)
