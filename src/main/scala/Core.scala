@@ -79,8 +79,12 @@ class DCache extends Module {
   val waitCnt = 1000;
   val wayBits = 1;
   val lineBits = 1;
-  val reg_write = Reg(next = io.core.req.reg_write)
+  val reg_write = Reg(init = Bool(false))
   val reg_dest = Reg(next = io.core.req.reg_dest)
+
+  when (io.core.req.reg_ma) {
+   reg_write := io.core.req.reg_write 
+  }
 
   val mem_read = io.core.req.reg_ma && io.core.req.reg_write
 
