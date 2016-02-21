@@ -9,6 +9,7 @@ object Implicits {
   }
 }
 
+// Data type between Core and ICache
 class IMemIO extends Bundle {
   val valid = Bool(INPUT)
   val ready = Bool(OUTPUT)
@@ -16,6 +17,7 @@ class IMemIO extends Bundle {
   val data = UInt(OUTPUT, width = 32)
 }
 
+// Data type between Core and DCache
 class DMemIO extends Bundle {
   val ready = Bool(OUTPUT)
   val req = new Bundle {
@@ -27,14 +29,17 @@ class DMemIO extends Bundle {
     val reg_write = Bool(INPUT)
     val reg_dest = UInt(INPUT, width = 5)
   }
+  // resp is valid when ready is true
   val resp = new Bundle {
+    // return reg_write and reg_dest given as the input.
     val reg_write = Bool(OUTPUT)
-    val reg_dest = UInt(OUTPUT, width = 32)
+    val reg_dest = UInt(OUTPUT, width = 5)
     val data = UInt(OUTPUT, width = 32)
   }
 }
 
-class DRamIO extends Bundle {
+// Data type between RAM and Cache
+class RamIO extends Bundle {
   val req = Bool (OUTPUT);
   val grant = Bool (INPUT);
   val we = Bool (OUTPUT);
@@ -47,11 +52,12 @@ class ICache extends Module {
 
   val io = new Bundle {
     val core = new IMemIO();
-    val ram  = new DRamIO();
+    val ram  = new RamIO();
   };
   val waitCnt = 1000;
+  // 2 way 32 lines
   val wayBits = 1;
-  val lineBits = 1;
+  val lineBits = 5;
 
   val cache = Module (new Cache (wayBits,lineBits,waitCnt));
   cache.io.cmdin.valid := io.core.valid;
@@ -60,6 +66,7 @@ class ICache extends Module {
   
   io.ram.req := cache.io.req;
   cache.io.grant := io.ram.grant;
+  //  We do not write because this is ICache
   io.ram.we := Bool(false);
   io.ram.addr := cache.io.cmdout.bits.addr;
 //  io.ram.wdataToDRAM := cache.io.wdataToDRAM;
@@ -74,19 +81,21 @@ class DCache extends Module {
 
   val io = new Bundle {
     val core = new DMemIO;
-    val ram  = new DRamIO;
+    val ram  = new RamIO;
   };
   val waitCnt = 1000;
+  // 2 way 32 lines
   val wayBits = 1;
-  val lineBits = 1;
+  val lineBits = 5;
   val reg_write = Reg(init = Bool(false))
-  val reg_dest = Reg(next = io.core.req.reg_dest)
+  val reg_dest = Reg(init = io.core.req.reg_dest)
 
   when (io.core.req.reg_ma) {
-   reg_write := io.core.req.reg_write 
+    reg_write := io.core.req.reg_write 
+    reg_dest := io.core.req.reg_dest
   }
 
-  val mem_read = io.core.req.reg_ma && io.core.req.reg_write
+  val mem_read = Reg(next = io.core.req.reg_ma && io.core.req.reg_write);
 
   val cache = Module (new Cache (wayBits,lineBits,waitCnt));
 
@@ -94,12 +103,12 @@ class DCache extends Module {
   cache.io.cmdin.bits.we := ! io.core.req.reg_write;
   cache.io.cmdin.bits.addr := io.core.req.addr;
   cache.io.wdataFromCore.bits := io.core.req.data;
-  cache.io.wdataFromCore.valid := Bool(true);
+  cache.io.wdataFromCore.valid := io.core.req.reg_ma;
   
   io.ram.req := cache.io.req;
   cache.io.grant := io.ram.grant;
 
-  io.ram.we := Bool(false);
+  io.ram.we := cache.io.cmdout.bits.we;
   io.ram.addr := cache.io.cmdout.bits.addr;
   io.ram.wdataToDRAM := cache.io.wdataToDRAM;
   cache.io.rdataToDRAM := io.ram.rdataToDRAM;
@@ -307,6 +316,87 @@ object CPU {
   def main(args: Array[String]) {
     chiselMainTest(args, () => Module(new CPU)) { c =>
       new CPUTests(c)
+    }
+  }
+}
+
+/*
+class DMemIO extends Bundle {
+  val ready = Bool(OUTPUT)
+  val req = new Bundle {
+    val addr = UInt(INPUT, width = 32)
+    val data = UInt(INPUT, width = 32)
+    // memory access is done when reg_ma is true
+    val reg_ma = Bool(INPUT)
+    // reg_write is true when writing to register (So memory access type is read)
+    val reg_write = Bool(INPUT)
+    val reg_dest = UInt(INPUT, width = 5)
+  }
+  // resp is valid when ready is true
+  val resp = new Bundle {
+    // return reg_write and reg_dest given as the input.
+    val reg_write = Bool(OUTPUT)
+    val reg_dest = UInt(OUTPUT, width = 5)
+    val data = UInt(OUTPUT, width = 32)
+  }
+}
+*/
+
+class DCacheTests(c: DCache) extends Tester(c) {
+  val waitCnt = 1000;
+  // check if reg_dest and reg_write are correct
+  
+  // grant is ignored
+  poke (c.io.ram.grant,true);
+  while (peek (c.io.core.ready) == 0) {
+    step (1);
+  }
+  
+  poke (c.io.core.req.addr,100);
+  poke (c.io.core.req.data,1111);
+  poke (c.io.core.req.reg_ma,true);
+  poke (c.io.core.req.reg_write,true);
+  poke (c.io.core.req.reg_dest,1);
+
+  poke (c.io.ram.rdataToDRAM.valid,true);
+  poke (c.io.ram.rdataToDRAM.bits,0);
+
+  step(1);
+  while (peek (c.io.core.ready) == 0) {
+    // 4 wors * high/low
+    step (waitCnt * 8);
+  }
+
+  poke (c.io.core.req.addr,100);
+  poke (c.io.core.req.data,1111);
+  poke (c.io.core.req.reg_ma,true);
+  poke (c.io.core.req.reg_write,true);
+  poke (c.io.core.req.reg_dest,2);
+  
+  expect (c.io.core.resp.reg_write,1);
+  expect (c.io.core.resp.reg_dest,1);
+
+  step(1);
+  while (peek (c.io.core.ready) == 0) {
+    poke (c.io.ram.grant,true);
+    poke (c.io.ram.rdataToDRAM.valid,true);
+    poke (c.io.ram.rdataToDRAM.bits,0);
+    step (1);
+  }
+
+  poke (c.io.core.req.addr,100);
+  poke (c.io.core.req.data,1111);
+  poke (c.io.core.req.reg_ma,true);
+  poke (c.io.core.req.reg_write,true);
+  poke (c.io.core.req.reg_dest,3);
+  expect (c.io.core.resp.reg_write,1);
+  expect (c.io.core.resp.reg_dest,2);
+}
+
+object DCache {
+  def main(args: Array[String]) {
+    chiselMainTest(args, () => Module(new DCache)) { c =>
+      new DCacheTests(c)
     }
   }
 }
